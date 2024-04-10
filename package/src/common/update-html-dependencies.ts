@@ -312,7 +312,7 @@ export async function updateHtmlDependencies(config: Configuration) {
       copyTo(join(dir, `reveal.js-${version}`, "css"), cssDir, { overwrite: true, preserveTimestamps: true });
       info("Port native scss themes to quarto theme");
       const sourceThemes = join(cssDir, "theme", "source");
-      const portedThemes = join(dirname(revealJs), "themes")
+      const portedThemes = join(dirname(revealJs), "themes");
       for (const fileEntry of Deno.readDirSync(sourceThemes)) {
         if (fileEntry.isFile && extname(fileEntry.name) === ".scss") {
           // Ignore specific files that are aliased to custom quarto theme
