@@ -183,15 +183,17 @@ function render_typst_css_to_props()
     quarto.log.output('pr', text)
     local parms = text:match('rgba?%((.*)%)')
     if not parms then return nil end
-    local foo, ncomma = parms:gsub(',', '')
-    quarto.log.output('pr p', parms, '/', foo, '/', ncomma)
+    local _, ncomma = parms:gsub(',', '')
     local comps = {}
     if ncomma then
       if ncomma > 1 and ncomma < 4 then
-        local matches = parms:match('([%a.]+),%s*')
+        local matches = parms:gmatch('([%d.]+),?')
         if not matches then return nil end
         for comp in matches do
-          table.insert(comps, comp)
+          table.insert(comps, {
+            unit = "int",
+            value = tonumber(comp)
+          })
         end
       else
         quarto.log.warning('rgb[a] should have 3-4 components', text)
@@ -269,6 +271,8 @@ function render_typst_css_to_props()
     end
     quarto.log.output('cco out', color)
     if not color.rep then
+      local fmtd = {}
+      for comp in color.value
       return 'rgb(' .. table.concat(color.value, ', ') .. ')'
     else
       local hexes = {}
