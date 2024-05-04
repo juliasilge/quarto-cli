@@ -12,6 +12,7 @@ format:
 import pandas as pd
 import numpy as np
 
+np.random.seed(17)
 weather_df = pd.DataFrame(np.random.rand(10,2)*5,
                           index=pd.date_range(start="2021-01-01", periods=10),
                           columns=["Tokyo", "Beijing"])

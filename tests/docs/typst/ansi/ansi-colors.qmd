@@ -1,7 +1,13 @@
 ---
-format: typst
-format-links: false
+format:
+  typst:
+    quality: 1
+  html:
+    quality: 1
+    format-links: false
 ---
+
+::: {html-pre-tag-processing='parse'}
 ```{python}
 from ansi2html import Ansi2HTMLConverter
 from IPython.core.display import display, HTML
@@ -25,3 +31,4 @@ lines2.append(lines[38] + lines[39])
 lines2.append(lines[40] + lines[41])
 display(HTML(conv.convert('\n'.join(lines2))))
 ```
+:::
