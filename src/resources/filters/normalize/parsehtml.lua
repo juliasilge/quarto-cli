@@ -58,14 +58,12 @@ function parse_html_tables()
     -- then have pandoc parse the table into a proper AST table block
     -- we're already at a state of sin here, cf https://stackoverflow.com/a/1732454
     -- but this is important enough to do a little more work anyway
+    local pat = patterns.html_table
+    local i, j = string.find(el.text, pat)
+    if i == nil then
+      return nil
+    end
     return true
-    -- allowing processing on non-tables for the sake of demo
-    -- local pat = patterns.html_table
-    -- local i, j = string.find(el.text, pat)
-    -- if i == nil then
-    --   return nil
-    -- end
-    -- return true
   end
 
   -- attempt to parse HTML tables from this raw HTML block 
@@ -100,41 +98,12 @@ function parse_html_tables()
   local function handle_raw_html_as_table(el)
     local eltext
     if(_quarto.format.isTypstOutput()) then
-      eltext = pandoc.system.with_temporary_directory('juice', function(tmpdir)
-        local juice_in = pandoc.path.join({tmpdir, 'juice-in.html'})
-        local jin = assert(io.open(juice_in, 'w'))
-        jin:write(el.text)
-        jin:flush()
-        local quarto_path = pandoc.path.join({os.getenv('QUARTO_BIN_PATH'), 'quarto'})
-        local jout = io.popen(quarto_path .. ' run ' ..
-            pandoc.path.join({os.getenv('QUARTO_SHARE_PATH'), 'scripts', 'juice.ts'}) .. ' ' ..
-            juice_in, 'r')
-        if jout then
-          return jout:read('a')
-        else
-          quarto.log.error('failed to juice')
-          return el.text
-        end
-      end)
+      eltext = juice(el.text)
     else
       eltext = el.text
     end
 
     local blocks = pandoc.Blocks({})
-    if eltext:find('^%<pre%>') and eltext:find('</pre>%s*$') then
-      quarto.log.output('getting warmer')
-      local preContentHtml = eltext:match('<pre>(.*)</pre>')
-      preContentHtml = replace_spaces_not_in_tags(preContentHtml)
-      preContentHtml = preContentHtml:gsub('\n','<br />')
-      if not preContentHtml then
-        quarto.log.output('no has pre')
-        return nil
-      end
-      local preDoc = pandoc.read(preContentHtml, "html+raw_html")
-      local block1 = preDoc.blocks[1]
-      -- quarto.log.output('parsed', block1)
-      blocks:insert(pandoc.Div(block1, pandoc.Attr("", {}, {style = 'font-family: Courier New; font-size: 8pt'})))
-    else
     local start = patterns.html_start_tag("table")
     local finish = patterns.html_end_tag("table")
 
@@ -220,7 +189,66 @@ function parse_html_tables()
     if cursor > 1 and cursor <= len then
       blocks:insert(pandoc.RawBlock(el.format, string.sub(eltext, cursor)))
     end
+    return pandoc.Div(blocks)
+  end
+
+  local function juice(el)
+    return pandoc.system.with_temporary_directory('juice', function(tmpdir)
+      local juice_in = pandoc.path.join({tmpdir, 'juice-in.html'})
+      local jin = assert(io.open(juice_in, 'w'))
+      jin:write(el.text)
+      jin:flush()
+      local quarto_path = pandoc.path.join({os.getenv('QUARTO_BIN_PATH'), 'quarto'})
+      local jout = io.popen(quarto_path .. ' run ' ..
+          pandoc.path.join({os.getenv('QUARTO_SHARE_PATH'), 'scripts', 'juice.ts'}) .. ' ' ..
+          juice_in, 'r')
+      if jout then
+        return jout:read('a')
+      else
+        quarto.log.error('failed to juice')
+        return el.text
+      end
+    end)
+  end
+
+  local function should_handle_raw_html_as_pre_tag(pre_tag)
+    if not _quarto.format.isRawHtml(pre_tag) then
+      return nil
     end
+    local pat = patterns.html_pre_tag
+    local i, j = string.find(pre_tag.text, pat)
+    if i == nil then
+      return nil
+    end
+    return true
+  end
+
+  local function handle_raw_html_as_pre_tag(pre_tag)
+    quarto.log.output('hrhapt')
+    local eltext
+    if(_quarto.format.isTypstOutput()) then
+      eltext = juice(pre_tag)
+      quarto.log.output('hrhapt', #eltext)
+    else
+      eltext = pre_tag.text
+    end
+
+    local preContentHtml = eltext:match('<pre>(.*)</pre>')
+    if not preContentHtml then
+      quarto.log.error('no pre', eltext:sub(1,1700))
+      return nil
+    end
+    preContentHtml = replace_spaces_not_in_tags(preContentHtml)
+    preContentHtml = preContentHtml:gsub('\n','<br />')
+    if not preContentHtml then
+      return nil
+    end
+    local preDoc = pandoc.read(preContentHtml, "html+raw_html")
+    local block1 = preDoc.blocks[1]
+    -- quarto.log.output('parsed', block1)
+    local blocks = pandoc.Blocks({
+      pandoc.Div(block1, pandoc.Attr("", {}, {style = 'font-family: Courier New; font-size: 8pt'}))
+    })
     return pandoc.Div(blocks)
   end
 
@@ -228,6 +256,10 @@ function parse_html_tables()
   if param(constants.kHtmlTableProcessing) == "none" then
     return {}
   end
+  if param(constants.kHtmlPreTagProcessing) == "none" then
+    return {}
+  end
+
   filter = {
     traverse = "topdown",
     Div = function(div)
@@ -242,6 +274,20 @@ function parse_html_tables()
           else
             -- when set on a div like div.cell-output-display, we need to keep it
             return div, false
+          end
+        end
+      end
+      if div.attributes[constants.kHtmlPreTagProcessing] then
+        local htmlPreTagProcessing = div.attributes[constants.kHtmlPreTagProcessing]
+        if htmlPreTagProcessing == "parse" then
+          quarto.log.output(div.content)
+          --quarto.log.output(quarto.utils.match('Div/:descendant/Div/.cell-output-display/:descendant/CodeBlock')(div))
+          local pre_tag = quarto.utils.match('Div/:descendant/Div/.cell-output-display/:descendant/CodeBlock')(div)
+          if pre_tag then -- and should_handle_raw_html_as_pre_tag(pre_tag) then
+            quarto.log.output(pre_tag)
+            return handle_raw_html_as_pre_tag(pre_tag), false
+          else
+            quarto.log.output('Nope.')
           end
         end
       end
