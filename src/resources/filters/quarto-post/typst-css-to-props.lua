@@ -187,13 +187,20 @@ function render_typst_css_to_props()
     local comps = {}
     if ncomma then
       if ncomma > 1 and ncomma < 4 then
-        local matches = parms:gmatch('([%d.]+),?')
+        local matches = parms:gmatch('([%d.]+%%?),?')
         if not matches then return nil end
         for comp in matches do
-          table.insert(comps, {
-            unit = "int",
-            value = tonumber(comp)
-          })
+          if comp:find '%%$' then
+            table.insert(comps, {
+              unit = "percent",
+              value = tonumber(comp:sub(1, -2))
+            })
+          else
+            table.insert(comps, {
+              unit = "int",
+              value = tonumber(comp)
+            })
+          end
         end
       else
         quarto.log.warning('rgb[a] should have 3-4 components', text)
@@ -213,11 +220,17 @@ function render_typst_css_to_props()
       local comps = {}
       if short then
         for c in value:gmatch '.' do
-          table.insert(comps, tonumber(c .. c, 16))
+          table.insert(comps, {
+            unit = "hex",
+            value = tonumber(c .. c, 16)
+          })
         end
       else
         for cc in value:gmatch '..' do
-          table.insert(comps, tonumber(cc, 16))
+          table.insert(comps, {
+            unit = "hex",
+            value = tonumber(cc, 16)
+          })
         end
       end
       return {
@@ -235,32 +248,80 @@ function render_typst_css_to_props()
     end
     return nil
   end
+  -- css can have fraction or percent
+  -- typst can have int or percent
   local function translate_opacity(opacity) 
     if not opacity then
       return nil
     end
     if opacity:find '%%$' then
-      opacity = tonumber(opacity:gsub('%%$', ''), 10) / 100
+      return {
+        unit = "percent",
+        value = tonumber(opacity:sub(1, -2), 10)
+      }
+    else
+      return {
+        unit = "fraction",
+        value = tonumber(opacity)
+      }
     end
-    return math.floor(255.9999 * tonumber(opacity))
+  end
+  local function percent_string(x)
+    local f = string.format('%.2f', x)
+    -- trim zeros after decimal point
+    f = f:gsub('%.00', ''):gsub('%.(%d)0', '.%1')
+    return f .. '%'
   end
   local function combine_color_opacity(color, opacity)
     quarto.log.output('cco in', color, opacity)
     if opacity then
       if not color then
+        zero = {
+          unit = 'int',
+          value = 0
+        }
         color = {
           type = 'rgb',
-          value = {0, 0, 0, opacity}
+          value = {zero, zero, zero, {unit = 'percent', value = 100}}
         }
       else
         if color.type == 'named' then
-          color = parse_rgb(css_named_colors[color])
+          assert(css_named_colors[color.value], 'unknown color ' ..color.value)
+          color = parse_rgb(css_named_colors[color.value])
         end
       end
-      color.value[4] = (color.value[4] or 1) * opacity 
+      local mult = 1
+      if opacity.unit == 'int' then
+        mult = opacity.value / 255.9999
+      elseif opacity.unit == 'percent' then
+        mult = opacity.value / 100.0
+      else
+        assert(opacity.unit == 'fraction', 'invalid unit ' .. opacity.unit)
+        mult = opacity.value
+      end
+      -- prefer percent/ratio output if not specified
+      if not color.value[4] then
+        quarto.log.output('orig color default')
+        color.value[4] = {
+          unit = 'percent',
+          value = 100
+        }
+      elseif color.value[4].unit == 'fraction' then
+        quarto.log.output('orig color fraction', color.value[4].value)
+        color.value[4] = {
+          unit = 'percent',
+          value = color.value[4].value * 100
+        }
+      else
+        quarto.log.output('has orig color', color.value[4])
+      end
+      color.value[4].value = color.value[4].value * mult
+      if color.value[4].unit == 'int' then
+        color.value[4].value = math.floor(color.value[4].value)
+      end
     else
       if color.type == 'named' then
-        if tcontains(typst_colors, color.value) then
+        if tcontains(typst_named_colors, color.value) then
           return color.value
         elseif css_named_colors[color.value] then
           color = parse_rgb(css_named_colors[color.value])
@@ -272,20 +333,44 @@ function render_typst_css_to_props()
     quarto.log.output('cco out', color)
     if not color.rep then
       local fmtd = {}
-      for comp in color.value
-      return 'rgb(' .. table.concat(color.value, ', ') .. ')'
-    else
-      local hexes = {}
-      if color.rep == 'shorthex' then
-        for comp in color.value do
-          -- take upper nibble
-          table.insert(hexes, string.format('%x', comp)[1])
-        end
-      elseif color.pre == 'hex' then
-        for comp in color.value do
-          table.insert(hexes, string.format('%x', comp))
+      for _, comp in ipairs(color.value) do
+        if comp.unit == 'int' then
+          table.insert(fmtd, tostring(comp.value))
+        elseif comp.unit == 'percent' then
+          table.insert(fmtd, percent_string(comp.value))
+        else
+          assert(false, 'invalid unit ' .. comp.unit)
         end
       end
+      return 'rgb(' .. table.concat(fmtd, ', ') .. ')'
+    else
+      quarto.log.output('hexout', #color.value, color.value)
+      if color.value[4] and color.value[4].unit ~= 'hex' then
+        if color.value[4].unit == 'percent' then
+          color.value[4] = {
+            unit = 'hex',
+            value = math.floor(color.value[4].value * 255.9999 / 100.0)
+          }
+        elseif color.value[4].unit == 'int' then
+          color.value[4].unit = 'hex'
+        end
+      end
+      local hexes = {}
+      if color.rep == 'shorthex' then
+        for i, comp in ipairs(color.value) do
+          -- take upper nibble
+          assert(comp.unit == 'hex', 'comp ' .. i .. ' invalid unit ' .. comp.unit)
+          table.insert(hexes, string.format('%x', comp.value):sub(1,1))
+        end
+      elseif color.rep == 'hex' then
+        for i, comp in ipairs(color.value) do
+          assert(comp.unit == 'hex', 'comp ' .. i .. ' invalid unit ' .. comp.unit)
+          table.insert(hexes, string.format('%x', comp.value))
+        end
+      else
+        assert(false, 'invalid rep ' .. color.rep)
+      end
+      quarto.log.output('hexes', hexes)
       return 'rgb("#' .. table.concat(hexes, '') .. '")'
     end
   end
