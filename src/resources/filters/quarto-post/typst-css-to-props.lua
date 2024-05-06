@@ -158,6 +158,9 @@ function render_typst_css_to_props()
     yellowgreen = 'rgb(154, 205, 50)',
   }
 
+  -- note that these are not always the same as css colors of the same name
+  -- we use these anyway, but it could cause a hue change when adding opacity
+  -- to one of these colors because we'll switch from typst to css interpretation
   local typst_named_colors = {
     'black',
     'gray',
@@ -178,33 +181,94 @@ function render_typst_css_to_props()
     'green',
     'lime',
   }
-  
+
+  -- css can have fraction or percent
+  -- typst can have int or percent
+  -- what goes for opacity also goes for alpha
+  local function translate_opacity(opacity) 
+    if not opacity then
+      return nil
+    end
+    if opacity == 'none' then
+      return {
+        unit = 'percent',
+        value = 100
+      }
+    elseif opacity:find '%%$' then
+      return {
+        unit = 'percent',
+        value = tonumber(opacity:sub(1, -2), 10)
+      }
+    else
+      quarto.log.output(opacity, 'parses as', tonumber(opacity))
+      return {
+        unit = 'fraction',
+        value = math.min(1.0, tonumber(opacity))
+      }
+    end
+  end
+  local function parse_color_components(matches)
+    local comps = {}
+    for comp in matches do
+      if #comps == 3 then
+        table.insert(comps, translate_opacity(comp))
+      else
+        if comp == 'none' then
+          table.insert(comps, {
+            unit = 'percent',
+            value = 0
+          })
+        elseif comp:find '%%$' then
+          table.insert(comps, {
+            unit = 'percent',
+            value = tonumber(comp:sub(1, -2))
+          })
+        else
+          table.insert(comps, {
+            unit = 'int',
+            value = tonumber(comp)
+          })
+        end
+      end
+    end
+    return comps
+  end  
   local function parse_rgb(text)
     quarto.log.output('pr', text)
     local parms = text:match('rgba?%((.*)%)')
+    local colorspace = 'rgb'
     if not parms then return nil end
     local _, ncomma = parms:gsub(',', '')
-    local comps = {}
-    if ncomma then
+    local comps
+    if ncomma ~= 0 then -- legacy comma-separated syntax
       if ncomma > 1 and ncomma < 4 then
-        local matches = parms:gmatch('([%d.]+%%?),?')
+        local matches = parms:gmatch('([%w.]+%%?),?')
         if not matches then return nil end
-        for comp in matches do
-          if comp:find '%%$' then
-            table.insert(comps, {
-              unit = "percent",
-              value = tonumber(comp:sub(1, -2))
-            })
-          else
-            table.insert(comps, {
-              unit = "int",
-              value = tonumber(comp)
-            })
-          end
-        end
+        comps = parse_color_components(matches)
       else
-        quarto.log.warning('rgb[a] should have 3-4 components', text)
+        quarto.log.warning(colorspace .. ' should have 3-4 components', text)
         return nil
+      end
+    else
+      local _, nslash = parms:gsub('/', '')
+      local colors, alpha
+      if nslash > 0 then
+        if nslash > 1 then
+          quarto.log.warning(colorspace .. ' with multiple slashes', text)
+          return nil
+        end
+        colors, alpha = parms:match('(.*) */ *(.*)')
+      else
+        colors = parms
+        alpha = ''
+      end
+      local matches = colors:gmatch('([%w.]+%%?) *')
+      if not matches then return nil end
+      comps = parse_color_components(matches)
+      if alpha ~= '' then
+        local alphacomp = translate_opacity(alpha)
+        quarto.log.output('alpha input', alpha, 'comp', alphacomp)
+        comps[4] = alphacomp
       end
     end
     return {
@@ -221,14 +285,14 @@ function render_typst_css_to_props()
       if short then
         for c in value:gmatch '.' do
           table.insert(comps, {
-            unit = "hex",
+            unit = 'hex',
             value = tonumber(c .. c, 16)
           })
         end
       else
         for cc in value:gmatch '..' do
           table.insert(comps, {
-            unit = "hex",
+            unit = 'hex',
             value = tonumber(cc, 16)
           })
         end
@@ -246,25 +310,8 @@ function render_typst_css_to_props()
         value = color
       }
     end
+    quarto.log.warning('could not interpret color', color)
     return nil
-  end
-  -- css can have fraction or percent
-  -- typst can have int or percent
-  local function translate_opacity(opacity) 
-    if not opacity then
-      return nil
-    end
-    if opacity:find '%%$' then
-      return {
-        unit = "percent",
-        value = tonumber(opacity:sub(1, -2), 10)
-      }
-    else
-      return {
-        unit = "fraction",
-        value = tonumber(opacity)
-      }
-    end
   end
   local function percent_string(x)
     local f = string.format('%.2f', x)
@@ -306,12 +353,6 @@ function render_typst_css_to_props()
           unit = 'percent',
           value = 100
         }
-      elseif color.value[4].unit == 'fraction' then
-        quarto.log.output('orig color fraction', color.value[4].value)
-        color.value[4] = {
-          unit = 'percent',
-          value = color.value[4].value * 100
-        }
       else
         quarto.log.output('has orig color', color.value[4])
       end
@@ -331,6 +372,12 @@ function render_typst_css_to_props()
       end
     end
     quarto.log.output('cco out', color)
+    if color.value[4] and color.value[4].unit == 'fraction' then
+      color.value[4] = {
+        unit = 'percent',
+        value = color.value[4].value * 100
+      }
+    end
     if not color.rep then
       local fmtd = {}
       for _, comp in ipairs(color.value) do
@@ -433,19 +480,19 @@ function render_typst_css_to_props()
   end
 
   local function translate_vertical_align(va)
-    if va == "top" then
-      return "top"
-    elseif va == "middle" then
-      return "horizon"
-    elseif va == "bottom" then
-      return "bottom"
+    if va == 'top' then
+      return 'top'
+    elseif va == 'middle' then
+      return 'horizon'
+    elseif va == 'bottom' then
+      return 'bottom'
     end
   end
 
 
   -- does the table contain a value
   local function tcontains(t,value)
-    if t and type(t)=="table" and value then
+    if t and type(t)=='table' and value then
       for _, v in ipairs(t) do
         if v == value then
           return true
@@ -467,7 +514,7 @@ function render_typst_css_to_props()
   local function to_typst_dict(tab)
     local entries = {}
     for k, v in sortedPairs(tab) do
-      if type(v) == "table" then
+      if type(v) == 'table' then
         v = to_typst_dict(v)
       end
       table.insert(entries, k .. ': ' .. v)
@@ -488,9 +535,9 @@ function render_typst_css_to_props()
         local k, v = to_kv(clause)
         if k == 'background-color' then
           cell.attributes['typst:fill'] = translate_color(v)
-        elseif k == "color" then
+        elseif k == 'color' then
           color = translate_color(v)
-        elseif k == "opacity" then
+        elseif k == 'opacity' then
           opacity = translate_opacity(v)
         elseif k == 'font-size' then
           cell.attributes['typst:text:size'] = translate_font_size(v, TEXT_PIXELS_TO_POINTS)
@@ -506,21 +553,21 @@ function render_typst_css_to_props()
           local side, attr = k:match('^border--(%a+)--(%a+)')
           if tcontains({'left','top','right','bottom'}, side) then
             borders[side] = borders[side] or {}
-            if attr == "width" then
+            if attr == 'width' then
               local thickness = translate_size(v, PADDING_PIXELS_TO_POINTS)
-              if thickness ~= "0pt" then
-                borders[side]["thickness"] = thickness
+              if thickness ~= '0pt' then
+                borders[side]['thickness'] = thickness
               else
                 table.insert(delsides, side)
               end
-            elseif attr == "style" then
+            elseif attr == 'style' then
               if v == 'none' then
                 table.insert(delsides, side)
               elseif tcontains({'dotted', 'dashed'}, v) then
                 borders[side]['dash'] = quote(v)
               end
-            elseif attr == "color" then
-              borders[side]["paint"] = translate_color(v)
+            elseif attr == 'color' then
+              borders[side]['paint'] = translate_color(v)
             end
           end
         end

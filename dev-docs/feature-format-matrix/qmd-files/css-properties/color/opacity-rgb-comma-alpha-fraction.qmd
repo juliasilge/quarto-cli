@@ -19,13 +19,13 @@ _quarto:
     typst:
       ensureTypstFileRegexMatches:
         -
-          - '\[#set text\(fill: rgb\(0, 0, 0, 0%\)\); B\]'
+          - '\[#set text\(fill: rgb\(70, 130, 180, 17%\)\); B\]'
         - []
 ---
 
 ```{=html}
 <table>
-    <tr><td>A</td><td style="color: transparent;">B</td></tr>
+    <tr><td>A</td><td style="color: rgb(70, 130, 180, 0.34); opacity: 0.5">B</td></tr>
 </table>
 ```
 
