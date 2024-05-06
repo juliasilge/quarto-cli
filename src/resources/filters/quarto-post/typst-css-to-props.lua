@@ -278,6 +278,7 @@ function render_typst_css_to_props()
   end
 
   local function translate_color(color)
+    quarto.log.output('t_c', color)
     if color:sub(1, 1) == '#' then
       local value = color:sub(2)
       local short = value:len() < 5
@@ -319,7 +320,7 @@ function render_typst_css_to_props()
     f = f:gsub('%.00', ''):gsub('%.(%d)0', '.%1')
     return f .. '%'
   end
-  local function combine_color_opacity(color, opacity)
+  local function output_color_opacity(color, opacity)
     quarto.log.output('cco in', color, opacity)
     if opacity then
       if not color then
@@ -534,7 +535,7 @@ function render_typst_css_to_props()
       for clause in style:gmatch('([^;]+)') do
         local k, v = to_kv(clause)
         if k == 'background-color' then
-          cell.attributes['typst:fill'] = translate_color(v)
+          cell.attributes['typst:fill'] = output_color_opacity(translate_color(v), nil)
         elseif k == 'color' then
           color = translate_color(v)
         elseif k == 'opacity' then
@@ -567,7 +568,7 @@ function render_typst_css_to_props()
                 borders[side]['dash'] = quote(v)
               end
             elseif attr == 'color' then
-              borders[side]['paint'] = translate_color(v)
+              borders[side]['paint'] = output_color_opacity(translate_color(v), nil)
             end
           end
         end
@@ -576,7 +577,7 @@ function render_typst_css_to_props()
         cell.attributes['typst:align'] = table.concat(aligns, ' + ')
       end
       if color or opacity then
-        cell.attributes['typst:text:fill'] = combine_color_opacity(color, opacity)
+        cell.attributes['typst:text:fill'] = output_color_opacity(color, opacity)
       end
       -- inset seems either buggy or hard to get right, see
       -- https://github.com/quarto-dev/quarto-cli/pull/9387#issuecomment-2076015962
@@ -602,7 +603,7 @@ function render_typst_css_to_props()
       for clause in style:gmatch('([^;]+)') do
         local k, v = to_kv(clause)
         if k == 'background-color' then
-          bkcolor = translate_color(v)
+          bkcolor = output_color_opacity(translate_color(v), nil)
         end
       end
     end
