@@ -413,7 +413,7 @@ function render_typst_css_to_props()
       elseif color.rep == 'hex' then
         for i, comp in ipairs(color.value) do
           assert(comp.unit == 'hex', 'comp ' .. i .. ' invalid unit ' .. comp.unit)
-          table.insert(hexes, string.format('%x', comp.value))
+          table.insert(hexes, string.format('%02x', comp.value))
         end
       else
         assert(false, 'invalid rep ' .. color.rep)
