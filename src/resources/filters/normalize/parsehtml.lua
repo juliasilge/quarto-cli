@@ -224,16 +224,14 @@ function parse_html_tables()
   end
 
   local function handle_raw_html_as_pre_tag(pre_tag)
-    quarto.log.output('hrhapt')
     local eltext
     if(_quarto.format.isTypstOutput()) then
       eltext = juice(pre_tag)
-      quarto.log.output('hrhapt', #eltext)
     else
       eltext = pre_tag.text
     end
 
-    local preContentHtml = eltext:match('<pre>(.*)</pre>')
+    local preContentHtml = eltext:match('<pre[^>]*>(.*)</pre>')
     if not preContentHtml then
       quarto.log.error('no pre', eltext:sub(1,1700))
       return nil
@@ -245,7 +243,6 @@ function parse_html_tables()
     end
     local preDoc = pandoc.read(preContentHtml, "html+raw_html")
     local block1 = preDoc.blocks[1]
-    -- quarto.log.output('parsed', block1)
     local blocks = pandoc.Blocks({
       pandoc.Div(block1, pandoc.Attr("", {}, {style = 'font-family: Courier New; font-size: 8pt'}))
     })
@@ -280,14 +277,9 @@ function parse_html_tables()
       if div.attributes[constants.kHtmlPreTagProcessing] then
         local htmlPreTagProcessing = div.attributes[constants.kHtmlPreTagProcessing]
         if htmlPreTagProcessing == "parse" then
-          quarto.log.output(div.content)
-          --quarto.log.output(quarto.utils.match('Div/:descendant/Div/.cell-output-display/:descendant/CodeBlock')(div))
-          local pre_tag = quarto.utils.match('Div/:descendant/Div/.cell-output-display/:descendant/CodeBlock')(div)
-          if pre_tag then -- and should_handle_raw_html_as_pre_tag(pre_tag) then
-            quarto.log.output(pre_tag)
+          local pre_tag = quarto.utils.match('Div/[1]/RawBlock')(div)
+          if pre_tag and should_handle_raw_html_as_pre_tag(pre_tag) then
             return handle_raw_html_as_pre_tag(pre_tag), false
-          else
-            quarto.log.output('Nope.')
           end
         end
       end
