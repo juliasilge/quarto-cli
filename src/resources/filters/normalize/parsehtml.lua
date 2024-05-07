@@ -44,6 +44,25 @@ local function replace_spaces_not_in_tags(text)
 end
 
 function parse_html_tables()
+  local function juice(htmltext)
+    return pandoc.system.with_temporary_directory('juice', function(tmpdir)
+      local juice_in = pandoc.path.join({tmpdir, 'juice-in.html'})
+      local jin = assert(io.open(juice_in, 'w'))
+      jin:write(htmltext)
+      jin:flush()
+      local quarto_path = pandoc.path.join({os.getenv('QUARTO_BIN_PATH'), 'quarto'})
+      local jout = io.popen(quarto_path .. ' run ' ..
+          pandoc.path.join({os.getenv('QUARTO_SHARE_PATH'), 'scripts', 'juice.ts'}) .. ' ' ..
+          juice_in, 'r')
+      if jout then
+        return jout:read('a')
+      else
+        quarto.log.error('failed to juice')
+        return htmltext
+      end
+    end)
+  end
+
   local function should_handle_raw_html_as_table(el)
     if not _quarto.format.isRawHtml(el) then
       return nil
@@ -192,25 +211,6 @@ function parse_html_tables()
     return pandoc.Div(blocks)
   end
 
-  local function juice(el)
-    return pandoc.system.with_temporary_directory('juice', function(tmpdir)
-      local juice_in = pandoc.path.join({tmpdir, 'juice-in.html'})
-      local jin = assert(io.open(juice_in, 'w'))
-      jin:write(el.text)
-      jin:flush()
-      local quarto_path = pandoc.path.join({os.getenv('QUARTO_BIN_PATH'), 'quarto'})
-      local jout = io.popen(quarto_path .. ' run ' ..
-          pandoc.path.join({os.getenv('QUARTO_SHARE_PATH'), 'scripts', 'juice.ts'}) .. ' ' ..
-          juice_in, 'r')
-      if jout then
-        return jout:read('a')
-      else
-        quarto.log.error('failed to juice')
-        return el.text
-      end
-    end)
-  end
-
   local function should_handle_raw_html_as_pre_tag(pre_tag)
     if not _quarto.format.isRawHtml(pre_tag) then
       return nil
@@ -226,7 +226,7 @@ function parse_html_tables()
   local function handle_raw_html_as_pre_tag(pre_tag)
     local eltext
     if(_quarto.format.isTypstOutput()) then
-      eltext = juice(pre_tag)
+      eltext = juice(pre_tag.text)
     else
       eltext = pre_tag.text
     end
