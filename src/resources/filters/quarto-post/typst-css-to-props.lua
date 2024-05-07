@@ -185,7 +185,7 @@ function render_typst_css_to_props()
   -- css can have fraction or percent
   -- typst can have int or percent
   -- what goes for opacity also goes for alpha
-  local function translate_opacity(opacity) 
+  local function translate_opacity(opacity)
     if not opacity then
       return nil
     end
@@ -232,7 +232,7 @@ function render_typst_css_to_props()
       end
     end
     return comps
-  end  
+  end
   local function parse_rgb(text)
     quarto.log.output('pr', text)
     local parms = text:match('rgba?%((.*)%)')
@@ -277,7 +277,7 @@ function render_typst_css_to_props()
     }
   end
 
-  local function translate_color(color)
+  local function parse_color(color)
     quarto.log.output('t_c', color)
     if color:sub(1, 1) == '#' then
       local value = color:sub(2)
@@ -311,14 +311,16 @@ function render_typst_css_to_props()
         value = color
       }
     end
-    quarto.log.warning('could not interpret color', color)
+    quarto.log.warning('invalid color', color)
     return nil
   end
-  local function percent_string(x)
+  local function format_float(x)
     local f = string.format('%.2f', x)
     -- trim zeros after decimal point
-    f = f:gsub('%.00', ''):gsub('%.(%d)0', '.%1')
-    return f .. '%'
+    return f:gsub('%.00', ''):gsub('%.(%d)0', '.%1')
+  end
+  local function percent_string(x)
+    return format_float(x) .. '%'
   end
   local function output_color_opacity(color, opacity)
     quarto.log.output('cco in', color, opacity)
@@ -330,13 +332,12 @@ function render_typst_css_to_props()
         }
         color = {
           type = 'rgb',
-          value = {zero, zero, zero, {unit = 'percent', value = 100}}
+          value = {zero, zero, zero}
         }
-      else
+      end
         if color.type == 'named' then
-          assert(css_named_colors[color.value], 'unknown color ' ..color.value)
-          color = parse_rgb(css_named_colors[color.value])
-        end
+        assert(css_named_colors[color.value], 'unknown color ' ..color.value)
+        color = parse_rgb(css_named_colors[color.value])
       end
       local mult = 1
       if opacity.unit == 'int' then
@@ -349,7 +350,6 @@ function render_typst_css_to_props()
       end
       -- prefer percent/ratio output if not specified
       if not color.value[4] then
-        quarto.log.output('orig color default')
         color.value[4] = {
           unit = 'percent',
           value = 100
@@ -362,6 +362,7 @@ function render_typst_css_to_props()
         color.value[4].value = math.floor(color.value[4].value)
       end
     else
+      if not color then return nil end
       if color.type == 'named' then
         if tcontains(typst_named_colors, color.value) then
           return color.value
@@ -418,7 +419,7 @@ function render_typst_css_to_props()
       else
         assert(false, 'invalid rep ' .. color.rep)
       end
-      quarto.log.output('hexes', hexes)
+      quarto.log.output('hexes', table.unpack(hexes))
       return 'rgb("#' .. table.concat(hexes, '') .. '")'
     end
   end
@@ -461,10 +462,9 @@ function render_typst_css_to_props()
   local function translate_size(fs, ratio)
     if not ratio then return fs end
     if fs:find 'px$' then
-      if fs == '1px' then return ratio .. 'pt' end
       local pixels = fs:match '(%d+)px'
-      local points = tonumber(pixels * ratio)
-      return points .. 'pt'
+      local points = tonumber(pixels) * ratio
+      return format_float(points) .. 'pt'
     elseif fs == '0' then
       return '0pt'
     else
@@ -490,7 +490,6 @@ function render_typst_css_to_props()
     end
   end
 
-
   -- does the table contain a value
   local function tcontains(t,value)
     if t and type(t)=='table' and value then
@@ -503,7 +502,6 @@ function render_typst_css_to_props()
     end
     return false
   end
-
 
   local function translate_horizontal_align(ha)
     if tcontains({'start', 'end', 'center'}, ha) then
@@ -523,21 +521,147 @@ function render_typst_css_to_props()
     return '(' .. table.concat(entries, ', ') .. ')'
   end
 
+  local border_sides = {'left', 'top', 'right', 'bottom'}
+  local border_properties = {'width', 'style', 'color'}
+  local border_width_keywords = {
+    thin = '1px',
+    medium = '3px',
+    thick = '5px'
+  }
+
+  local function all_equal(seq)
+    local a = seq[1]
+    for i = 2, #seq do
+      if a ~= seq[i] then
+        return false
+      end
+    end
+    return true
+  end
+
+  local function has_any_suffix(s, suffixes)
+    for _, suff in ipairs(suffixes) do
+      if s:find(suff .. '$') then
+        return true
+      end
+    end
+    return false
+  end
+
+  local function translate_border_width(v)
+    v = border_width_keywords[v] or v
+    local thickness = translate_size(v, PADDING_PIXELS_TO_POINTS)
+    if thickness == '0pt' then
+      quarto.log.output('tbw delete', v)
+      return 'delete'
+    end
+    return thickness
+  end
+
+  local function translate_border_style(v)
+    local dash
+    if v == 'none' then
+      return 'delete'
+    elseif tcontains({'dotted', 'dashed'}, v) then
+      return quote(v)
+    end
+  end
+
+  local function translate_border_color(v)
+    return output_color_opacity(parse_color(v), nil)
+  end
+
+  local border_translators = {
+    width = {
+      prop = 'thickness',
+      fn = translate_border_width
+    },
+    style = {
+      prop = 'dash',
+      fn = translate_border_style
+    },
+    color = {
+      prop = 'paint',
+      fn = translate_border_color
+    }
+  }
+
+  -- only a couple of absolutes are actually supported but might as well parse
+  local length_units = {
+    -- font-relative
+    'em', 'rem', 'ex', 'rex', 'cap', 'rcap', 'ch', 'rch', 'ic', 'ric', 'lh', 'rlh',
+    -- viewport-relative
+    'vw', 'svw', 'lvw', 'dvw', 'vh', 'svh', 'lvh', 'dvh',
+    'vi', 'svi', 'lvi', 'dvi', 'vb', 'svb', 'lvb', 'dvb',
+    'vmin', 'svmin', 'lvmin', 'dvmin ', 'vmax', 'svmax', 'lvmax', 'dvmax',
+    -- absolute
+    'cm', 'mm', 'Q', 'in', 'pt', 'pc', 'px'
+  }
+  -- only a few of these map to typst, again seems simplest to parse anyway
+  local border_styles = {
+    'none', 'hidden', 'dotted', 'dashed', 'solid', 'double', 'groove', 'ridge', 'inset', 'outset', 'inherit', 'initial', 'revert', 'revert-layer', 'unset'
+  }
+
+  local function translate_border(v)
+    local width = 'medium'
+    local style = 'none'
+    local paint = 'black'
+    local start = 0
+    local count = 0
+    repeat
+      local fbeg, fend = v:find('%w+%b()', start)
+      if fbeg then
+        local paint2 = translate_border_color(v:sub(fbeg, fend))
+        if paint2 then
+          paint = paint2
+        end
+        start = fend + 1
+      else
+        local fbeg, fend = v:find('%S+', start)
+        local term = v:sub(fbeg, fend)
+        if tcontains(border_styles, term) then
+          style = term
+        else
+          if has_any_suffix(term, length_units) or border_width_keywords[term] then
+            width = term
+          else
+            local paint2 = translate_border_color(term)
+            if paint2 then
+              paint = paint2
+            else
+              quarto.log.warning('invalid border shorthand', term)
+            end
+          end
+        end
+        start = fend + 1
+        while v.sub(start, start) == ' ' do
+          start = start + 1
+        end
+      end
+      count = count + 1
+    until count > 2 or start >= #v
+    return {
+      thickness = translate_border_width(width),
+      dash = translate_border_style(style),
+      paint = paint
+    }
+  end
+
+
   local function annotate_cell(cell)
     local style = cell.attributes['style']
     if style ~= nil then
       local paddings = {}
       local aligns = {}
       local borders = {}
-      local delsides = {}
       local color = nil
       local opacity = nil
       for clause in style:gmatch('([^;]+)') do
         local k, v = to_kv(clause)
         if k == 'background-color' then
-          cell.attributes['typst:fill'] = output_color_opacity(translate_color(v), nil)
+          cell.attributes['typst:fill'] = output_color_opacity(parse_color(v), nil)
         elseif k == 'color' then
-          color = translate_color(v)
+          color = parse_color(v)
         elseif k == 'opacity' then
           opacity = translate_opacity(v)
         elseif k == 'font-size' then
@@ -550,26 +674,40 @@ function render_typst_css_to_props()
           if a then table.insert(aligns, a) end
         elseif k:find '^padding--' then
           paddings[k:match('^padding--(%a+)')] = translate_size(v, PADDING_PIXELS_TO_POINTS)
-        elseif k:find '^border--' then
-          local side, attr = k:match('^border--(%a+)--(%a+)')
-          if tcontains({'left','top','right','bottom'}, side) then
-            borders[side] = borders[side] or {}
-            if attr == 'width' then
-              local thickness = translate_size(v, PADDING_PIXELS_TO_POINTS)
-              if thickness ~= '0pt' then
-                borders[side]['thickness'] = thickness
-              else
-                table.insert(delsides, side)
+        elseif k:find '^border' then
+          local _, ndash = k:gsub('-', '')
+          if ndash == 0 then
+            local border = translate_border(v)
+            for _, side in ipairs(border_sides) do
+              borders[side] = borders[side] or {}
+              for k2, v2 in pairs(border) do
+                borders[side][k2] = v2
               end
-            elseif attr == 'style' then
-              if v == 'none' then
-                table.insert(delsides, side)
-              elseif tcontains({'dotted', 'dashed'}, v) then
-                borders[side]['dash'] = quote(v)
-              end
-            elseif attr == 'color' then
-              borders[side]['paint'] = output_color_opacity(translate_color(v), nil)
             end
+          elseif ndash == 1 then
+            local part = k:match('^border--(%a+)')
+            if tcontains(border_sides, part) then
+              borders[part] = borders[part] or {}
+              local border = translate_border(v)
+              for k2, v2 in pairs(border) do
+                borders[part][k2] = v2
+              end
+            elseif tcontains(border_properties, part) then
+
+            else
+              quarto.log.warning('invalid 2-item border key ' .. k)
+            end
+          elseif ndash == 2 then
+            local side, prop = k:match('^border--(%a+)--(%a+)')
+            if tcontains(border_sides, side) and tcontains(border_properties, prop) then
+              borders[side] = borders[side] or {}
+              local tr = border_translators[prop]
+              borders[side][tr.prop] = tr.fn(v)
+            else
+              quarto.log.warning('invalid 3-item border key ' .. k)
+            end
+          else
+            quarto.log.warning('invalid too-many-item key ' .. k)
           end
         end
       end
@@ -579,21 +717,51 @@ function render_typst_css_to_props()
       if color or opacity then
         cell.attributes['typst:text:fill'] = output_color_opacity(color, opacity)
       end
+
       -- inset seems either buggy or hard to get right, see
       -- https://github.com/quarto-dev/quarto-cli/pull/9387#issuecomment-2076015962
       -- if next(paddings) ~= nil then
       --   cell.attributes['typst:inset'] = to_typst_dict(paddings)
       -- end
-      -- since sides override eachother, we need to delete 0 width sides
+
+      -- since e.g. the left side of one cell can override the right side of another
+      -- we do not specify sides that have width=0 or style=none
+      -- this assumes an additive model - currently no way to start with all lines
+      -- and remove some
+      quarto.log.output('border output pre', borders)
+      local delsides = {}
+      for side, attrs in pairs(borders) do
+        if attrs.thickness == 'delete' or attrs.dash == 'delete' then
+          table.insert(delsides, side)
+        end
+      end
       for _, dside in pairs(delsides) do
         borders[dside] = nil
       end
       if next(borders) ~= nil then
-        cell.attributes['typst:stroke'] = to_typst_dict(borders)
+        quarto.log.output('border output', borders)
+        -- if all are the same, use one stroke and don't split by side
+        local thicknesses = {}
+        local dashes = {}
+        local paints = {}
+        for _, side in ipairs(border_sides) do
+          table.insert(thicknesses, borders[side] and borders[side].thickness or 0)
+          table.insert(dashes, borders[side] and borders[side].dash or 0)
+          table.insert(paints, borders[side] and borders[side].paint or 0)
+        end
+        quarto.log.output('thicknesses', table.unpack(thicknesses))
+        quarto.log.output('dashes', table.unpack(dashes))
+        quarto.log.output('paints', table.unpack(paints))
+        if all_equal(thicknesses) and all_equal(dashes) and all_equal(paints) then
+          assert(borders.left)
+          cell.attributes['typst:stroke'] = to_typst_dict(borders.left)
+        else
+          cell.attributes['typst:stroke'] = to_typst_dict(borders)
+        end
       end
     end
     return cell
-  end 
+  end
 
   function annotate_span(span)
     span = annotate_cell(span) -- not really
@@ -603,7 +771,7 @@ function render_typst_css_to_props()
       for clause in style:gmatch('([^;]+)') do
         local k, v = to_kv(clause)
         if k == 'background-color' then
-          bkcolor = output_color_opacity(translate_color(v), nil)
+          bkcolor = output_color_opacity(parse_color(v), nil)
         end
       end
     end
