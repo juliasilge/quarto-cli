@@ -355,7 +355,7 @@ function render_typst_css_to_props()
           value = 100
         }
       else
-        quarto.log.output('has orig color', color.value[4])
+        quarto.log.output('has orig alpha', color.value[4])
       end
       color.value[4].value = color.value[4].value * mult
       if color.value[4].unit == 'int' then
@@ -516,8 +516,11 @@ function render_typst_css_to_props()
       if type(v) == 'table' then
         v = to_typst_dict(v)
       end
-      table.insert(entries, k .. ': ' .. v)
+      if k and v then
+        table.insert(entries, k .. ': ' .. v)
+      end
     end
+    if #entries == 0 then return nil end
     return '(' .. table.concat(entries, ', ') .. ')'
   end
 
@@ -565,6 +568,7 @@ function render_typst_css_to_props()
     elseif tcontains({'dotted', 'dashed'}, v) then
       return quote(v)
     end
+    return nil
   end
 
   local function translate_border_color(v)
@@ -658,7 +662,8 @@ function render_typst_css_to_props()
       local opacity = nil
       for clause in style:gmatch('([^;]+)') do
         local k, v = to_kv(clause)
-        if k == 'background-color' then
+        if not k or not v then
+        elseif k == 'background-color' then
           cell.attributes['typst:fill'] = output_color_opacity(parse_color(v), nil)
         elseif k == 'color' then
           color = parse_color(v)
