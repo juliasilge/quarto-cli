@@ -465,11 +465,12 @@ function render_typst_css_to_props()
       local pixels = fs:match '(%d+)px'
       local points = tonumber(pixels) * ratio
       return format_float(points) .. 'pt'
+    elseif fs:find 'pt$' then
+      return fs
     elseif fs == '0' then
       return '0pt'
-    else
-      return fs
     end
+    return nil
   end
 
   local function translate_font_size(fs, ratio)
@@ -606,25 +607,37 @@ function render_typst_css_to_props()
     'none', 'hidden', 'dotted', 'dashed', 'solid', 'double', 'groove', 'ridge', 'inset', 'outset', 'inherit', 'initial', 'revert', 'revert-layer', 'unset'
   }
 
-  -- border shorthand
-  -- https://developer.mozilla.org/en-US/docs/Web/CSS/border
-  local function translate_border(v)
-    -- not sure why the defaults that work are not the same ones specified
-    local width = 'medium'
-    local style = 'solid' -- css specifies none
-    local paint = 'black' -- css specifies currentcolor
+  function parse_multiple(s, limit, callback)
     local start = 0
     local count = 0
     repeat
-      local fbeg, fend = v:find('%w+%b()', start)
+      start = callback(s, start)
+      -- not really necessary with string:find
+      -- as evidenced that s.sub also works
+      while s:sub(start, start) == ' ' do
+        start = start + 1
+      end
+      count = count + 1
+    until count >=limit or start >= #s
+  end
+
+  -- border shorthand
+  -- https://developer.mozilla.org/en-US/docs/Web/CSS/border
+  local function translate_border(v)
+    -- not sure why the default style that works is not the same one specified
+    local width = 'medium'
+    local style = 'solid' -- css specifies none
+    local paint = 'black' -- css specifies currentcolor
+    parse_multiple(v, 3, function(s, start)
+      local fbeg, fend = s:find('%w+%b()', start)
       if fbeg then
-        local paint2 = translate_border_color(v:sub(fbeg, fend))
+        local paint2 = translate_border_color(s:sub(fbeg, fend))
         if paint2 then
           paint = paint2
         end
-        start = fend + 1
+        return fend + 1
       else
-        local fbeg, fend = v:find('%S+', start)
+        fbeg, fend = s:find('%S+', start)
         local term = v:sub(fbeg, fend)
         if tcontains(border_styles, term) then
           style = term
@@ -640,13 +653,9 @@ function render_typst_css_to_props()
             end
           end
         end
-        start = fend + 1
-        while v.sub(start, start) == ' ' do
-          start = start + 1
-        end
+        return fend + 1
       end
-      count = count + 1
-    until count > 2 or start >= #v
+    end)
     return {
       thickness = translate_border_width(width),
       dash = translate_border_style(style),
@@ -654,6 +663,100 @@ function render_typst_css_to_props()
     }
   end
 
+  local function parse_width(s, start)
+      fbeg, fend = s:find('%S+', start)
+      local term = s:sub(fbeg, fend)
+      local thickness = translate_border_width(term)
+      return thickness, fend + 1
+  end
+
+  local function parse_style(s, start)
+    fbeg, fend = s:find('%S+', start)
+    local term = s:sub(fbeg, fend)
+    local dash = translate_border_style(term)
+    return dash, fend + 1
+  end
+  
+  local function parse_color(s, start)
+    local fbeg, fend = s:find('%w+%b()', start)
+    if not fbeg then
+      fbeg, fend = s:find('%S+', start)
+    end
+    if not fbeg then return nil end
+    local paint = translate_border_color(s:sub(fbeg, fend))
+    return paint, fend + 1
+  end
+
+  local border_parsers = {
+    width = parse_width,
+    style = parse_style,
+    color = parse_color,
+  }
+  local function handle_border(k, v, borders)
+    local _, ndash = k:gsub('-', '')
+    if ndash == 0 then
+      local border = translate_border(v)
+      for _, side in ipairs(border_sides) do
+        borders[side] = borders[side] or {}
+        for k2, v2 in pairs(border) do
+          borders[side][k2] = v2
+        end
+      end
+    elseif ndash == 1 then
+      local part = k:match('^border--(%a+)')
+      if tcontains(border_sides, part) then
+        borders[part] = borders[part] or {}
+        local border = translate_border(v)
+        for k2, v2 in pairs(border) do
+          borders[part][k2] = v2
+        end
+      elseif tcontains(border_properties, part) then
+        local items = {}
+        parse_multiple(v, 4, function(s, start)
+          local item, newstart = border_parsers[part](s, start)
+          table.insert(items, item)
+          return newstart
+        end)
+        for _, side in ipairs(border_sides) do
+          borders[side] = borders[side] or {}
+        end
+        local xlate = border_translators[part]
+        if #items == 1 then
+          for _, side in ipairs(border_sides) do
+            borders[side][xlate.prop] = items[1]
+          end
+        elseif #items == 2 then
+          borders.top[xlate.prop] = items[1]
+          borders.right[xlate.prop] = items[2]
+          borders.bottom[xlate.prop] = items[1]
+          borders.left[xlate.prop] = items[2]
+        elseif #items == 3 then
+          borders.top[xlate.prop] = items[1]
+          borders.right[xlate.prop] = items[2]
+          borders.bottom[xlate.prop] = items[3]
+          borders.left[xlate.prop] = items[2]
+        elseif #items == 4 then
+          borders.top[xlate.prop] = items[1]
+          borders.right[xlate.prop] = items[2]
+          borders.bottom[xlate.prop] = items[3]
+          borders.left[xlate.prop] = items[4]
+        end
+      else
+        quarto.log.warning('invalid 2-item border key ' .. k)
+      end
+    elseif ndash == 2 then
+      local side, prop = k:match('^border--(%a+)--(%a+)')
+      if tcontains(border_sides, side) and tcontains(border_properties, prop) then
+        borders[side] = borders[side] or {}
+        local tr = border_translators[prop]
+        borders[side][tr.prop] = tr.fn(v)
+      else
+        quarto.log.warning('invalid 3-item border key ' .. k)
+      end
+    else
+      quarto.log.warning('invalid too-many-item key ' .. k)
+    end
+  end
 
   local function annotate_cell(cell)
     local style = cell.attributes['style']
@@ -684,40 +787,7 @@ function render_typst_css_to_props()
         elseif k:find '^padding--' then
           paddings[k:match('^padding--(%a+)')] = translate_size(v, PADDING_PIXELS_TO_POINTS)
         elseif k:find '^border' then
-          local _, ndash = k:gsub('-', '')
-          if ndash == 0 then
-            local border = translate_border(v)
-            for _, side in ipairs(border_sides) do
-              borders[side] = borders[side] or {}
-              for k2, v2 in pairs(border) do
-                borders[side][k2] = v2
-              end
-            end
-          elseif ndash == 1 then
-            local part = k:match('^border--(%a+)')
-            if tcontains(border_sides, part) then
-              borders[part] = borders[part] or {}
-              local border = translate_border(v)
-              for k2, v2 in pairs(border) do
-                borders[part][k2] = v2
-              end
-            elseif tcontains(border_properties, part) then
-
-            else
-              quarto.log.warning('invalid 2-item border key ' .. k)
-            end
-          elseif ndash == 2 then
-            local side, prop = k:match('^border--(%a+)--(%a+)')
-            if tcontains(border_sides, side) and tcontains(border_properties, prop) then
-              borders[side] = borders[side] or {}
-              local tr = border_translators[prop]
-              borders[side][tr.prop] = tr.fn(v)
-            else
-              quarto.log.warning('invalid 3-item border key ' .. k)
-            end
-          else
-            quarto.log.warning('invalid too-many-item key ' .. k)
-          end
+          handle_border(k, v, borders)
         end
       end
       if next(aligns) ~= nil then
