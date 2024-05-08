@@ -663,21 +663,21 @@ function render_typst_css_to_props()
     }
   end
 
-  local function parse_width(s, start)
+  local function consume_width(s, start)
       fbeg, fend = s:find('%S+', start)
       local term = s:sub(fbeg, fend)
       local thickness = translate_border_width(term)
       return thickness, fend + 1
   end
 
-  local function parse_style(s, start)
+  local function consume_style(s, start)
     fbeg, fend = s:find('%S+', start)
     local term = s:sub(fbeg, fend)
     local dash = translate_border_style(term)
     return dash, fend + 1
   end
   
-  local function parse_color(s, start)
+  local function consume_color(s, start)
     local fbeg, fend = s:find('%w+%b()', start)
     if not fbeg then
       fbeg, fend = s:find('%S+', start)
@@ -687,10 +687,10 @@ function render_typst_css_to_props()
     return paint, fend + 1
   end
 
-  local border_parsers = {
-    width = parse_width,
-    style = parse_style,
-    color = parse_color,
+  local border_consumers = {
+    width = consume_width,
+    style = consume_style,
+    color = consume_color,
   }
   local function handle_border(k, v, borders)
     local _, ndash = k:gsub('-', '')
@@ -713,7 +713,7 @@ function render_typst_css_to_props()
       elseif tcontains(border_properties, part) then
         local items = {}
         parse_multiple(v, 4, function(s, start)
-          local item, newstart = border_parsers[part](s, start)
+          local item, newstart = border_consumers[part](s, start)
           table.insert(items, item)
           return newstart
         end)

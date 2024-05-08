@@ -6,7 +6,7 @@ format:
     quality: na
   typst:
     quality: 2
-    comment: "table cell only"
+    comment: "td, span only"
   dashboard:
     quality: 1
   docx:
@@ -19,13 +19,13 @@ _quarto:
     typst:
       ensureTypstFileRegexMatches:
         -
-          - '\[#set text\(fill: rgb\("#c1d7"\)\); B\]'
+          - '\[#set text\(fill: rgb\(128, 0, 0, 50%\)\); B\]'
         - []
 ---
 
 ```{=html}
 <table>
-    <tr><td>A</td><td style="color: #c1d; opacity: 0.5">B</td></tr>
+    <tr><td>A</td><td style="color: maroon; opacity: 0.5">B</td></tr>
 </table>
 ```
 

@@ -6,7 +6,7 @@ format:
     quality: na
   typst:
     quality: 2
-    comment: "table cell only"
+    comment: "td, span only"
   dashboard:
     quality: 1
   docx:
@@ -19,14 +19,13 @@ _quarto:
     typst:
       ensureTypstFileRegexMatches:
         -
-          # note the input is invalid, there is no "int alpha" input for rgb() in css
-          - '\[#set text\(fill: rgb\(70, 130, 180, 50%\)\); B\]'
+          - '\[#set text\(fill: rgb\("#4682b440"\)\); B\]'
         - []
 ---
 
 ```{=html}
 <table>
-    <tr><td>A</td><td style="color: rgb(70, 130, 180, 170); opacity: 0.5">B</td></tr>
+    <tr><td>A</td><td style="color: #4682b480; opacity: 0.5">B</td></tr>
 </table>
 ```
 

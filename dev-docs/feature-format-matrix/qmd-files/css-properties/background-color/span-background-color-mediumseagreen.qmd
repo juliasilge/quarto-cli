@@ -6,7 +6,7 @@ format:
     quality: na
   typst:
     quality: 2
-    comment: "table cell only"
+    comment: "td, span only"
   dashboard:
     quality: 1
   docx:
@@ -18,14 +18,9 @@ _quarto:
   tests:
     typst:
       ensureTypstFileRegexMatches:
+
         -
-          - '\[#set text\(fill: rgb\("#000066"\)\); B\]'
+          - '\[#highlight\(fill: rgb\(60, 179, 113\)\[text with a green background\]\]'
         - []
 ---
-
-```{=html}
-<table>
-    <tr><td>A</td><td style="color: #000066">B</td></tr>
-</table>
-```
-
+This is some [text with a green background]{style="background-color:mediumseagreen"}.
