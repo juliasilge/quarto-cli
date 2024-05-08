@@ -606,10 +606,13 @@ function render_typst_css_to_props()
     'none', 'hidden', 'dotted', 'dashed', 'solid', 'double', 'groove', 'ridge', 'inset', 'outset', 'inherit', 'initial', 'revert', 'revert-layer', 'unset'
   }
 
+  -- border shorthand
+  -- https://developer.mozilla.org/en-US/docs/Web/CSS/border
   local function translate_border(v)
+    -- not sure why the defaults that work are not the same ones specified
     local width = 'medium'
-    local style = 'none'
-    local paint = 'black'
+    local style = 'solid' -- css specifies none
+    local paint = 'black' -- css specifies currentcolor
     local start = 0
     local count = 0
     repeat
@@ -663,6 +666,7 @@ function render_typst_css_to_props()
       for clause in style:gmatch('([^;]+)') do
         local k, v = to_kv(clause)
         if not k or not v then
+          -- pass
         elseif k == 'background-color' then
           cell.attributes['typst:fill'] = output_color_opacity(parse_color(v), nil)
         elseif k == 'color' then
