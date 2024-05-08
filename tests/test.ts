@@ -176,7 +176,8 @@ export function test(test: TestDescriptor) {
           try {
             await test.execute();
           } catch (e) {
-            logError(e)
+            logError(e);
+            fail("Uncaught exception in test\n" + e.message);
           }
 
           // Cleanup the output logging
